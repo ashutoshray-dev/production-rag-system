@@ -17,6 +17,7 @@ load_dotenv()
 import os
 from langsmith import traceable
 from langchain_core.runnables import RunnableConfig
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 
 os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
 
@@ -32,6 +33,7 @@ class chattitle(TypedDict):
 
 # <------------------ model ------------------------->
 model = ChatOllama(model='qwen2.5:3b')
+embedding_model = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
 
 # <-------------------- helper funcs ----------------------->
@@ -47,7 +49,7 @@ def split_file(docs, chunk_size:int, chunk_overlap:int):
     return split_docs
 @traceable(name='build_store')
 def build_store(split_docs):
-    embedding_model = OllamaEmbeddings(model='embeddinggemma')
+    # embedding_model = OllamaEmbeddings(model='embeddinggemma')
     embed_docs = FAISS.from_documents(split_docs, embedding_model)
     return embed_docs
 @traceable(name='setup_pipeline')
@@ -64,7 +66,7 @@ def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.
     messages = state['messages']
     docs = state.get('docs')
     vector_store_path = state.get('vector_store_path')
-    embedding_model = OllamaEmbeddings(model='embeddinggemma')
+    # embedding_model = OllamaEmbeddings(model='embeddinggemma')
     thread_id = config.get("configurable", {}).get("thread_id", "default_thread")
     # vector_store_path = state.get('vector_store_path')
         # retriever = embed_docs.as_retriever()
