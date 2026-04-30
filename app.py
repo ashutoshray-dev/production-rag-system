@@ -17,8 +17,6 @@ load_dotenv()
 import os
 from langsmith import traceable
 from langchain_core.runnables import RunnableConfig
-import tempfile
-# from front import uploaded_file
 
 os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
 
@@ -136,11 +134,25 @@ graph.add_edge('chat_node', END)
 system = graph.compile(checkpointer=checkpointer)
 
 
-user_message = input('Ask questions from ml research paper:')
-thread_id = 1
-config = {'configurable':{'thread_id':thread_id}}
-if user_message:
-    response = system.invoke({'messages': [HumanMessage(content=user_message)]}, config=config)
-    print('AI: ', response['messages'][-1].content)
+# user_message = input('Ask questions from ml research paper:')
+# thread_id = 1
+# config = {'configurable':{'thread_id':thread_id}}
+# if user_message:
+#     response = system.invoke({'messages': [HumanMessage(content=user_message)]}, config=config)
+#     print('AI: ', response['messages'][-1].content)
     
 
+# <--------------------------- helper funcs------------------------>
+def retrieve_threads_list():
+    seen_threads = set()
+    all_threads = list()
+    for checkpoint in checkpointer.list(None):
+        thread = checkpoint.config['configurable']['thread_id']
+        if thread not in seen_threads:
+            seen_threads.add(thread)
+            all_threads.insert(0, thread)
+    return all_threads
+def generate_title(user_input):
+    structured_model = model.with_structured_output(chattitle)
+    title = structured_model.invoke(f'summarise this message input and generate a suitable 4-5words title for this input that feels appropriate for the topic. If no input is present genetrate a random string.\ninput:{user_input}')
+    return title['chat_title']
