@@ -18,6 +18,9 @@ import os
 from langsmith import traceable
 from langchain_core.runnables import RunnableConfig
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_community.retrievers import BM25Retriever
+from langchain_classic.retrievers import EnsembleRetriever
+import pickle
 
 os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
 
@@ -27,6 +30,7 @@ class ChatState(TypedDict):
     chat_title: str
     docs: list[Document]
     vector_store_path: str
+    bm25_path: str
 
 class chattitle(TypedDict):
     chat_title: Annotated[str, "A brief 4-5word title that captures the essence of the input."]
@@ -47,17 +51,17 @@ def split_file(docs, chunk_size:int, chunk_overlap:int):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     split_docs = text_splitter.split_documents(docs)
     return split_docs
-@traceable(name='build_store')
-def build_store(split_docs):
-    # embedding_model = OllamaEmbeddings(model='embeddinggemma')
-    embed_docs = FAISS.from_documents(split_docs, embedding_model)
-    return embed_docs
+# @traceable(name='build_store')
+# def build_store(split_docs):
+#     # embedding_model = OllamaEmbeddings(model='embeddinggemma')
+#     embed_docs = FAISS.from_documents(split_docs, embedding_model)
+#     return embed_docs
 @traceable(name='setup_pipeline')
 def setup_pipeline(path:str, chunk_size:int, chunk_overlap:int):
     docs = load_file(path=path)
     split_docs = split_file(docs=docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    embed_docs = build_store(split_docs=split_docs)
-    return embed_docs
+    # embed_docs = build_store(split_docs=split_docs)
+    return split_docs
 
 
 # <-------------------- nodes ----------------------------->
@@ -66,22 +70,46 @@ def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.
     messages = state['messages']
     docs = state.get('docs')
     vector_store_path = state.get('vector_store_path')
+    bm25_path = state.get('bm25_path')
     # embedding_model = OllamaEmbeddings(model='embeddinggemma')
     thread_id = config.get("configurable", {}).get("thread_id", "default_thread")
     # vector_store_path = state.get('vector_store_path')
-        # retriever = embed_docs.as_retriever()
-    if not vector_store_path or not os.path.exists(state['vector_store_path']):
-        vector_store = setup_pipeline(path, 1000, 200)
-        save_path = f"faiss/index_{thread_id}"
-        vector_store.save_local(save_path)
-        retriever = vector_store.as_retriever()
-        docs = retriever.invoke(messages[-1].content)
-        return {'docs': docs, 'vector_store_path': save_path}
+    #     retriever = embed_docs.as_retriever()
+    # if not vector_store_path or not os.path.exists(state['vector_store_path']):
+    #     vector_store = setup_pipeline(path, 1000, 200)
+    #     save_path = f"faiss/index_{thread_id}"
+    #     vector_store.save_local(save_path)
+    #     retriever = vector_store.as_retriever()
+    #     docs = retriever.invoke(messages[-1].content)
+    #     return {'docs': docs, 'vector_store_path': save_path}
     
-    vector_store = FAISS.load_local(state['vector_store_path'], embeddings=embedding_model, allow_dangerous_deserialization=True)
-    retriever = vector_store.as_retriever()
-    docs = retriever.invoke(messages[-1].content)
-    return {'docs': docs}
+    # vector_store = FAISS.load_local(state['vector_store_path'], embeddings=embedding_model, allow_dangerous_deserialization=True)
+    # retriever = vector_store.as_retriever()
+    # docs = retriever.invoke(messages[-1].content)
+    # return {'docs': docs}
+
+    if vector_store_path and bm25_path and os.path.exists(vector_store_path) and os.path.exists(bm25_path):
+        vector_store = FAISS.load_local(state['vector_store_path'], embeddings=embedding_model, allow_dangerous_deserialization=True)
+        with open(state['bm25_path'], "rb") as f:
+            bm25_retriever = pickle.load(f)
+    else: 
+        split_docs = setup_pipeline(path, 1000, 200)
+        vector_store = FAISS.from_documents(split_docs, embedding_model)
+        vector_store_path = f"index/faiss_{thread_id}"
+        vector_store.save_local(vector_store_path)
+        bm25_retriever = BM25Retriever.from_documents(split_docs)
+        bm25_path = f"index/bm25_{thread_id}"
+        with open(bm25_path, "wb") as f:
+            pickle.dump(bm25_retriever, f)
+    
+    faiss_retriever = vector_store.as_retriever(search_kwargs={"k":5})
+    bm25_retriever.k = 5
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, faiss_retriever],
+        weights=[0.5, 0.5]
+    )
+    retrieved_docs = ensemble_retriever.invoke(messages[-1].content)
+    return {'docs': retrieved_docs, 'vector_store_path': vector_store_path, 'bm25_path': bm25_path}
     # formatted_docs = format_docs(docs)
     # chain = (
     #     {'context': retriever|format_docs, 'input': RunnablePassthrough()} | prompt | model | parser
