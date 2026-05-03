@@ -6,7 +6,7 @@ from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langgraph.graph.message import add_messages
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from typing import TypedDict, Annotated
@@ -147,8 +147,8 @@ def chat_node(state: ChatState):
     response = chain.invoke(messages[-1].content)
     if not state.get('chat_title'):
         title = generate_title(messages[0].content)
-        return {'messages': [response], 'chat_title':title}
-    return {'messages':[response]}
+        return {'messages': [AIMessage(content=response)], 'chat_title':title}
+    return {'messages': [AIMessage(content=response)]}
 
 
 
