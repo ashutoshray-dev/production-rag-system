@@ -4,12 +4,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, AIMessageChunk
 from langgraph.graph.message import add_messages
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, List
 from langgraph.checkpoint.sqlite import SqliteSaver
 import sqlite3
 from dotenv import load_dotenv
@@ -21,6 +21,8 @@ from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 import pickle
+from pydantic import BaseModel, Field
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
 
@@ -35,8 +37,23 @@ class ChatState(TypedDict):
 class chattitle(TypedDict):
     chat_title: Annotated[str, "A brief 4-5word title that captures the essence of the input."]
 
+# class answer_format(TypedDict):
+#     answer: Annotated[str, "The actual answer/content from the model."]
+#     page_num: Annotated[str, "The page numbers of the retrieved docs as mentioned in the context in format- Page No.: 1, 2, 4."]
+#     source: Annotated[str, "The source of the retrieved docs as mentioned in the context"]
+# class CitedClaim(BaseModel):
+#     claim: str = Field(description="A specific statement or sentence from the answer")
+#     source: str = Field(description="The source filename")
+#     page: int = Field(description="The page number")
+
+class FinalResponse(BaseModel):
+    answer: str = Field(description="The answer with inline citations in format: [page no:X, source:filename]")
+    # citations: List[CitedClaim]= Field(description="A list of citations that support the answer provided.")
+
+
 # <------------------ model ------------------------->
-model = ChatOllama(model='qwen2.5:3b')
+# model = ChatOllama(model='qwen2.5:3b')
+model = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=os.getenv("GOOGLE_API_KEY"), streaming=True)
 embedding_model = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
 
@@ -120,35 +137,113 @@ def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.
 @traceable(name="chat_query")
 def chat_node(state: ChatState):
     messages = state['messages']
+    parser = JsonOutputParser(pydantic_object=FinalResponse)
     docs = state.get('docs')
     prompt = ChatPromptTemplate.from_template(
-            template = """You are a helpful assistant. Answer the questions based on the context provided only. Every correct answer along with it citations will be rewarded
-            with 1000 points and every wrong answer without proper citations will be penalised. Don't try to come up with random answers, only answer the queries 
-            from the provided context unless it's a general query. Strictly follow this rule: For every claim you make, you MUST cite the source name and page number in brackets, like [source_name.pdf, p.5]. If the context does not contain the answer, state that you do not know unless it's a general greeting query or so. Do not use outside knowledge.
-            <context>
-            {context}
-            </context>
-            question: {input}"""
-        )
-    parser = StrOutputParser()
+      template="""You are a helpful assistant. Answer the questions based on the context provided only. Do not provided any answer outside the provided context.
+   
+      For your answer:
+        For every statement you make, include an inline citation at the end of the sentence in this exact
+        format: Answer [page no:X, source: filename]
+        If multiple sources support the statement, cite them all: Answer [page no:1, source: doc1.pdf][page no:5, source: doc2.pdf]
+
+      Context format you'll see:
+      --- DOCUMENT ID: X | SOURCE: <source_name> | PAGE: <page_num> --- <content>
+
+        <context>
+        {context}
+        </context>
+      question: {input}
+      Answer (with inline citations):"""
+    )
+# <<<<<<<<<<<<-----------------------------------new prompt technique for validation----------------------------->>>>>>>>>>>>>>>>>>>>>>.    
+    # prompt = ChatPromptTemplate.from_template(
+    #   template="""You are a helpful assistant. Answer the questions based on the context provided only. Do not provided any answer outside the provided context.
+   
+    #   For your answer:
+    #     For every statement you make, include an inline citation at the end of the sentence in this exact
+    #     format: Answer [page no:X, source: filename]
+    #     If multiple sources support the statement, cite them all: Answer [page no:1, source: doc1.pdf][page no:5, source: doc2.pdf]
+
+    #   Context format you'll see:
+    #   --- DOCUMENT ID: X | SOURCE: <source_name> | PAGE: <page_num> --- <content>
+
+    #     <context>
+    #     {context}
+    #     </context>
+    #   question: {input}
+    #   Answer (with inline citations):"""
+    # ).partial(format_instructions=parser.get_format_instructions())
+    # parser = StrOutputParser()
+    
     # retriever = pipeline_query(path=None)
-    def format_docs(docs):
-        content =  "\n\n".join(doc.page_content for doc in docs)
-        source = "\n".join(doc.metadata['source'] for doc in docs)
-        page = "\n".join(doc.metadata['page_label'] for doc in docs)
-        return {'content': content, 
-                'document_source': source, 
-                'page_numbers': page}
+    # def format_docs(docs):
+    #     content =  "\n\n".join(doc.page_content for doc in docs)
+    #     source = "\n".join(doc.metadata['source'] for doc in docs)
+    #     page = "\n".join(doc.metadata['page_label'] for doc in docs)
+    #     return {'content': content, 
+    #             'document_source': source, 
+    #             'page_numbers': page}
+    def format_docs_with_metadata(docs):
+        formatted = []
+        for i, doc in enumerate(docs):
+            # Extract metadata safely
+            source = doc.metadata.get("source", "Unknown Source")
+            page = doc.metadata.get("page_label", "N/A")
+            
+            # Create a clearly delineated block
+            doc_string = f"--- DOCUMENT ID: {i} | SOURCE: {source} | PAGE: {page} ---\n{doc.page_content}\n"
+            formatted.append(doc_string)
+    
+        return "\n".join(formatted)
     # formatted_docs = format_docs(docs)
+    # answer_model = model.with_structured_output(answer_format)
+    structured_model = model.with_structured_output(FinalResponse)
     chain = (
-        {'context':lambda _: format_docs(docs), 'input': RunnablePassthrough()} | prompt | model | parser
+        {'context':lambda _: format_docs_with_metadata(docs), 'input': RunnablePassthrough()} | prompt | model
     )
     # print(retriever)
     response = chain.invoke(messages[-1].content)
     if not state.get('chat_title'):
         title = generate_title(messages[0].content)
-        return {'messages': [AIMessage(content=response)], 'chat_title':title}
-    return {'messages': [AIMessage(content=response)]}
+        return {'messages': [AIMessage(content=response.content)], 'chat_title':title}
+    return {'messages': [AIMessage(content=response.content)]}
+
+    # for partial_object in chain.stream(messages[-1].content):
+    #     response = ""
+    #     if partial_object and "answer" in partial_object:
+    #         response = "".join(partial_object["answer"])
+    #         yield partial_object["answer"]
+    
+    # if not state.get('chat_title'):
+    #     title = generate_title(messages[0].content)
+    #     return {'messages': [AIMessage(content=response)], 'chat_title': title}
+    # return {'messages': [AIMessage(content=response)]}
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<---------------------------------------------new method----------------------->>>>>>>>
+    # full_response_text = ""
+    # last_sent_text = "" # Track what we've already sent
+
+    # # 1. Stream the chain
+    # for partial_object in chain.stream(messages[-1].content):
+    #     if partial_object and "answer" in partial_object:
+    #         full_content = partial_object["answer"]
+            
+    #         # 2. Calculate only the NEW characters (the delta)
+    #         # JsonOutputParser yields the full string so far, not just the token
+    #         new_text = full_content[len(last_sent_text):]
+    #         if new_text:
+    #             # 3. Yield as an AIMessageChunk so the UI sees it
+    #             yield AIMessageChunk(content=new_text)
+    #             last_sent_text = full_content
+    #             full_response_text = full_content
+
+    # # 4. Final state update with the FULL text
+    # if not state.get('chat_title'):
+    #     title = generate_title(messages[0].content)
+    #     return {'messages': [AIMessage(content=full_response_text)], 'chat_title': title}
+    
+    # return {'messages': [AIMessage(content=full_response_text)]}
+
 
 
 
