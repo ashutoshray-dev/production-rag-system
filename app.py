@@ -23,6 +23,7 @@ from langchain_classic.retrievers import EnsembleRetriever
 import pickle
 from pydantic import BaseModel, Field
 from langchain_google_genai import ChatGoogleGenerativeAI
+from sentence_transformers import CrossEncoder
 
 os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
 
@@ -34,8 +35,10 @@ class ChatState(TypedDict):
     vector_store_path: str
     bm25_path: str
 
-class chattitle(TypedDict):
-    chat_title: Annotated[str, "A brief 4-5word title that captures the essence of the input."]
+# class chattitle(TypedDict):
+#     chat_title: Annotated[str, "A brief 4-5word title that captures the essence of the input."]
+class ChatTitle(BaseModel):
+    chat_title: str = Field(description="A brief 4-5word title that captures the essence of the input.")
 
 # class answer_format(TypedDict):
 #     answer: Annotated[str, "The actual answer/content from the model."]
@@ -55,6 +58,7 @@ class FinalResponse(BaseModel):
 # model = ChatOllama(model='qwen2.5:3b')
 model = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=os.getenv("GOOGLE_API_KEY"), streaming=True)
 embedding_model = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+encoder_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
 
 
 # <-------------------- helper funcs ----------------------->
@@ -79,7 +83,14 @@ def setup_pipeline(path:str, chunk_size:int, chunk_overlap:int):
     split_docs = split_file(docs=docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     # embed_docs = build_store(split_docs=split_docs)
     return split_docs
-
+@traceable(name='reranking')
+def rerank(retrieved_docs:Document, query:str):
+    sentence_pairs = [[query, doc.page_content] for doc in retrieved_docs]
+    scores = encoder_model.predict(sentence_pairs)
+    for i, doc in enumerate(retrieved_docs):
+        doc.metadata["rerank_score"] = float(scores[i])
+    reranking = retrieved_docs.sort(key=lambda x:x.metadata["rerank_score"], reverse=True)
+    return retrieved_docs
 
 # <-------------------- nodes ----------------------------->
 @traceable(name="pipeline_query")
@@ -126,6 +137,13 @@ def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.
         weights=[0.5, 0.5]
     )
     retrieved_docs = ensemble_retriever.invoke(messages[-1].content)
+    # sentence_pairs = [[messages[-1].content, doc.page_content] for doc in retrieved_docs]
+    # scores = encoder_model.predict(sentence_pairs)
+    # for i, doc in enumerate(retrieved_docs):
+    #     doc.metadata["rerank_score"] = float(scores[i])
+    
+    # retrieved_docs.sort(key=lambda x:x.metadata["rerank_score"], reverse=True)
+    reranked_docs = rerank(retrieved_docs, messages[-1].content)
     return {'docs': retrieved_docs, 'vector_store_path': vector_store_path, 'bm25_path': bm25_path}
     # formatted_docs = format_docs(docs)
     # chain = (
@@ -144,8 +162,8 @@ def chat_node(state: ChatState):
    
       For your answer:
         For every statement you make, include an inline citation at the end of the sentence in this exact
-        format: Answer [page no:X, source: filename]
-        If multiple sources support the statement, cite them all: Answer [page no:1, source: doc1.pdf][page no:5, source: doc2.pdf]
+        format: [page no:X, source: filename]
+        If multiple sources support the statement, cite them all: [page no:1, source: doc1.pdf][page no:5, source: doc2.pdf]
 
       Context format you'll see:
       --- DOCUMENT ID: X | SOURCE: <source_name> | PAGE: <page_num> --- <content>
@@ -197,7 +215,6 @@ def chat_node(state: ChatState):
     
         return "\n".join(formatted)
     # formatted_docs = format_docs(docs)
-    # answer_model = model.with_structured_output(answer_format)
     structured_model = model.with_structured_output(FinalResponse)
     chain = (
         {'context':lambda _: format_docs_with_metadata(docs), 'input': RunnablePassthrough()} | prompt | model
@@ -206,6 +223,7 @@ def chat_node(state: ChatState):
     response = chain.invoke(messages[-1].content)
     if not state.get('chat_title'):
         title = generate_title(messages[0].content)
+        # print(title)
         return {'messages': [AIMessage(content=response.content)], 'chat_title':title}
     return {'messages': [AIMessage(content=response.content)]}
 
@@ -278,6 +296,9 @@ def retrieve_threads_list():
             all_threads.insert(0, thread)
     return all_threads
 def generate_title(user_input):
-    structured_model = model.with_structured_output(chattitle)
-    title = structured_model.invoke(f'summarise this message input and generate a suitable 4-5words title for this input that feels appropriate for the topic. If no input is present genetrate a random string.\ninput:{user_input}')
-    return title['chat_title']
+    structured_model = model.with_structured_output(ChatTitle)
+    title = structured_model.invoke(f'generate a suitable 4-5words title for this input that feels appropriate for the topic. If no input is present genetrate a random string.\ninput:{user_input}')
+    # for models that return structured output with typeddict
+    # return title['chat_title']
+    # for outputs with pydantic
+    return title.chat_title
