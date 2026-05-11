@@ -1,0 +1,131 @@
+from langgraph.graph import StateGraph, START, END
+from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, AIMessageChunk
+from langgraph.graph.message import add_messages
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from typing import TypedDict, Annotated, List
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
+from dotenv import load_dotenv
+load_dotenv()
+import os
+from langsmith import traceable
+from langchain_core.runnables import RunnableConfig
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_community.retrievers import BM25Retriever
+from langchain_classic.retrievers import EnsembleRetriever
+import pickle
+from pydantic import BaseModel, Field
+from langchain_google_genai import ChatGoogleGenerativeAI
+from sentence_transformers import CrossEncoder
+
+os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
+
+# <------------------- state ----------------------->
+class ChatState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+    chat_title: str
+    docs: list[Document]
+    vector_store_path: str
+    bm25_path: str
+
+
+
+# <-------------------- nodes ----------------------------->
+@traceable(name="pipeline_query")
+def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.pdf'):
+    messages = state['messages']
+    docs = state.get('docs')
+    vector_store_path = state.get('vector_store_path')
+    bm25_path = state.get('bm25_path')
+    # embedding_model = OllamaEmbeddings(model='embeddinggemma')
+    thread_id = config.get("configurable", {}).get("thread_id", "default_thread")
+
+    if vector_store_path and bm25_path and os.path.exists(vector_store_path) and os.path.exists(bm25_path):
+        vector_store = FAISS.load_local(state['vector_store_path'], embeddings=embedding_model, allow_dangerous_deserialization=True)
+        with open(state['bm25_path'], "rb") as f:
+            bm25_retriever = pickle.load(f)
+    else: 
+        split_docs = setup_pipeline(path, 1000, 200)
+        vector_store = FAISS.from_documents(split_docs, embedding_model)
+        vector_store_path = f"index/faiss_{thread_id}"
+        vector_store.save_local(vector_store_path)
+        bm25_retriever = BM25Retriever.from_documents(split_docs)
+        bm25_path = f"index/bm25_{thread_id}"
+        with open(bm25_path, "wb") as f:
+            pickle.dump(bm25_retriever, f)
+    
+    faiss_retriever = vector_store.as_retriever(search_kwargs={"k":5})
+    bm25_retriever.k = 5
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, faiss_retriever],
+        weights=[0.5, 0.5]
+    )
+    retrieved_docs = ensemble_retriever.invoke(messages[-1].content)
+
+    reranked_docs = rerank(retrieved_docs, messages[-1].content)
+    return {'docs': retrieved_docs, 'vector_store_path': vector_store_path, 'bm25_path': bm25_path}
+
+
+@traceable(name="chat_query")
+def chat_node(state: ChatState):
+    messages = state['messages']
+    docs = state.get('docs')
+    prompt = ChatPromptTemplate.from_template(
+      template="""You are a helpful assistant. Answer the questions based on the context provided only. Do not provided any answer outside the provided context.
+   
+      For your answer:
+        For every statement you make, include an inline citation at the end of the sentence in this exact
+        format: [page no:X, source: filename]
+        If multiple sources support the statement, cite them all: [page no:1, source: doc1.pdf][page no:5, source: doc2.pdf]
+
+      Context format you'll see:
+      --- DOCUMENT ID: X | SOURCE: <source_name> | PAGE: <page_num> --- <content>
+
+        <context>
+        {context}
+        </context>
+      question: {input}
+      Answer (with inline citations):"""
+    )
+
+    def format_docs_with_metadata(docs):
+        formatted = []
+        for i, doc in enumerate(docs):
+            # Extract metadata safely
+            source = doc.metadata.get("source", "Unknown Source")
+            page = doc.metadata.get("page_label", "N/A")
+            
+            # Create a clearly delineated block
+            doc_string = f"--- DOCUMENT ID: {i} | SOURCE: {source} | PAGE: {page} ---\n{doc.page_content}\n"
+            formatted.append(doc_string)
+    
+        return "\n".join(formatted)
+    # formatted_docs = format_docs(docs)
+    structured_model = model.with_structured_output(FinalResponse)
+    chain = (
+        {'context':lambda _: format_docs_with_metadata(docs), 'input': RunnablePassthrough()} | prompt | model
+    )
+    response = chain.invoke(messages[-1].content)
+    if not state.get('chat_title'):
+        title = generate_title(messages[0].content)
+        # print(title)
+        return {'messages': [AIMessage(content=response.content)], 'chat_title':title}
+    return {'messages': [AIMessage(content=response.content)]}
+
+
+
+# <------------------ graph ------------------------>
+conn = sqlite3.connect(database='rag-system.db', check_same_thread=False)
+checkpointer = SqliteSaver(conn=conn)
+graph = StateGraph(ChatState)
+graph.add_node('pipeline_&_query', pipeline_query)
+graph.add_node('chat_node', chat_node)
+graph.add_edge(START, 'pipeline_&_query')
+graph.add_edge('pipeline_&_query', 'chat_node')
+graph.add_edge('chat_node', END)
+system = graph.compile(checkpointer=checkpointer)
