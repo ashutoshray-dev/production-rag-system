@@ -1,5 +1,6 @@
 import streamlit as st
-from app import system, retrieve_threads_list
+from backend.graph import system
+from backend.utils import retrieve_threads_list
 from langchain_core.messages import HumanMessage, AIMessage, AIMessageChunk
 import uuid
 
