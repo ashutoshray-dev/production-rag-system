@@ -1,12 +1,10 @@
 from langgraph.graph import StateGraph, START, END
-from langchain_ollama import ChatOllama, OllamaEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, AIMessageChunk
+from langchain_core.messages import BaseMessage, AIMessage
 from langgraph.graph.message import add_messages
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+from langchain_core.runnables import RunnablePassthrough
 from typing import TypedDict, Annotated, List
 from langgraph.checkpoint.sqlite import SqliteSaver
 import sqlite3
@@ -15,13 +13,13 @@ load_dotenv()
 import os
 from langsmith import traceable
 from langchain_core.runnables import RunnableConfig
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 import pickle
 from pydantic import BaseModel, Field
-from langchain_google_genai import ChatGoogleGenerativeAI
-from sentence_transformers import CrossEncoder
+from .models import *
+from .utils import *
+from .checkpoint import checkpointer
 
 os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
 
@@ -106,7 +104,7 @@ def chat_node(state: ChatState):
     
         return "\n".join(formatted)
     # formatted_docs = format_docs(docs)
-    structured_model = model.with_structured_output(FinalResponse)
+    # structured_model = model.with_structured_output(FinalResponse)
     chain = (
         {'context':lambda _: format_docs_with_metadata(docs), 'input': RunnablePassthrough()} | prompt | model
     )
@@ -120,8 +118,8 @@ def chat_node(state: ChatState):
 
 
 # <------------------ graph ------------------------>
-conn = sqlite3.connect(database='rag-system.db', check_same_thread=False)
-checkpointer = SqliteSaver(conn=conn)
+# conn = sqlite3.connect(database='rag-system.db', check_same_thread=False)
+# checkpointer = SqliteSaver(conn=conn)
 graph = StateGraph(ChatState)
 graph.add_node('pipeline_&_query', pipeline_query)
 graph.add_node('chat_node', chat_node)
