@@ -73,23 +73,24 @@ def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.
 def chat_node(state: ChatState):
     messages = state['messages']
     docs = state.get('docs')
-    prompt = ChatPromptTemplate.from_template(
-      template="""You are a helpful assistant. Answer the questions based on the context provided only. Do not provided any answer outside the provided context.
+    # prompt = ChatPromptTemplate.from_template(
+    #   template="""You are a helpful assistant. Answer the questions based on the context provided only. Do not provided any answer outside the provided context.
    
-      For your answer:
-        For every statement you make, include an inline citation at the end of the sentence in this exact
-        format: [page no:X, source: filename]
-        If multiple sources support the statement, cite them all: [page no:1, source: doc1.pdf][page no:5, source: doc2.pdf]
+    #   For your answer:
+    #     For every statement you make, include an inline citation at the end of the sentence in this exact
+    #     format: [page no:X, source: filename]
+    #     If multiple sources support the statement, cite them all: [page no:1, source: doc1.pdf][page no:5, source: doc2.pdf]
 
-      Context format you'll see:
-      --- DOCUMENT ID: X | SOURCE: <source_name> | PAGE: <page_num> --- <content>
+    #   Context format you'll see:
+    #   --- DOCUMENT ID: X | SOURCE: <source_name> | PAGE: <page_num> --- <content>
 
-        <context>
-        {context}
-        </context>
-      question: {input}
-      Answer (with inline citations):"""
-    )
+    #     <context>
+    #     {context}
+    #     </context>
+    #   question: {input}
+    #   Answer (with inline citations):"""
+    # )
+    prompt = load_system_prompt()
 
     def format_docs_with_metadata(docs):
         formatted = []

@@ -7,6 +7,8 @@ import os
 from langsmith import traceable
 from .models import *
 from .checkpoint import checkpointer
+import yaml
+from langchain_core.prompts import ChatPromptTemplate
 
 os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
 
@@ -44,7 +46,6 @@ def rerank(retrieved_docs:Document, query:str):
 
 
 
-
 def retrieve_threads_list():
     seen_threads = set()
     all_threads = list()
@@ -61,3 +62,16 @@ def generate_title(user_input):
     # return title['chat_title']
     # for outputs with pydantic
     return title.chat_title
+
+
+def load_system_prompt(config_path: str = "configs/prompts.yaml") -> ChatPromptTemplate:
+    """Loads the system prompt from the YAML file and returns prompt template."""
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Prompt configuration file missing at: {config_path}")
+    
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    raw_template = config.get("system_prompt")
+    return ChatPromptTemplate.from_template(raw_template)
+
