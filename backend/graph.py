@@ -1,13 +1,10 @@
 from langgraph.graph import StateGraph, START, END
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import BaseMessage, AIMessage
 from langgraph.graph.message import add_messages
 from langchain_core.runnables import RunnablePassthrough
 from typing import TypedDict, Annotated, List
-from langgraph.checkpoint.sqlite import SqliteSaver
-import sqlite3
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -32,7 +29,6 @@ class ChatState(TypedDict):
     bm25_path: str
 
 
-
 # <-------------------- nodes ----------------------------->
 @traceable(name="pipeline_query")
 def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.pdf'):
@@ -40,7 +36,6 @@ def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.
     docs = state.get('docs')
     vector_store_path = state.get('vector_store_path')
     bm25_path = state.get('bm25_path')
-    # embedding_model = OllamaEmbeddings(model='embeddinggemma')
     thread_id = config.get("configurable", {}).get("thread_id", "default_thread")
 
     if vector_store_path and bm25_path and os.path.exists(vector_store_path) and os.path.exists(bm25_path):
@@ -73,23 +68,6 @@ def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.
 def chat_node(state: ChatState):
     messages = state['messages']
     docs = state.get('docs')
-    # prompt = ChatPromptTemplate.from_template(
-    #   template="""You are a helpful assistant. Answer the questions based on the context provided only. Do not provided any answer outside the provided context.
-   
-    #   For your answer:
-    #     For every statement you make, include an inline citation at the end of the sentence in this exact
-    #     format: [page no:X, source: filename]
-    #     If multiple sources support the statement, cite them all: [page no:1, source: doc1.pdf][page no:5, source: doc2.pdf]
-
-    #   Context format you'll see:
-    #   --- DOCUMENT ID: X | SOURCE: <source_name> | PAGE: <page_num> --- <content>
-
-    #     <context>
-    #     {context}
-    #     </context>
-    #   question: {input}
-    #   Answer (with inline citations):"""
-    # )
     prompt = load_system_prompt()
 
     def format_docs_with_metadata(docs):
@@ -104,7 +82,6 @@ def chat_node(state: ChatState):
             formatted.append(doc_string)
     
         return "\n".join(formatted)
-    # formatted_docs = format_docs(docs)
     # structured_model = model.with_structured_output(FinalResponse)
     chain = (
         {'context':lambda _: format_docs_with_metadata(docs), 'input': RunnablePassthrough()} | prompt | model
@@ -112,15 +89,12 @@ def chat_node(state: ChatState):
     response = chain.invoke(messages[-1].content)
     if not state.get('chat_title'):
         title = generate_title(messages[0].content)
-        # print(title)
         return {'messages': [AIMessage(content=response.content)], 'chat_title':title}
     return {'messages': [AIMessage(content=response.content)]}
 
 
 
 # <------------------ graph ------------------------>
-# conn = sqlite3.connect(database='rag-system.db', check_same_thread=False)
-# checkpointer = SqliteSaver(conn=conn)
 graph = StateGraph(ChatState)
 graph.add_node('pipeline_&_query', pipeline_query)
 graph.add_node('chat_node', chat_node)
