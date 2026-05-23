@@ -19,6 +19,7 @@ class FinalResponse(BaseModel):
 
 # <------------------ model ------------------------->
 # model = ChatOllama(model='qwen2.5:3b')
-model = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=os.getenv("GOOGLE_API_KEY"), streaming=True)
+# model = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", google_api_key=os.getenv("GOOGLE_API_KEY"), streaming=True)
+model = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite-preview", google_api_key=os.getenv("GOOGLE_API_KEY"), streaming=True)
 embedding_model = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 encoder_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
