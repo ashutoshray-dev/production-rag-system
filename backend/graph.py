@@ -14,9 +14,13 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 import pickle
 from pydantic import BaseModel, Field
-from .models import *
-from .utils import *
-from .checkpoint import checkpointer
+import sys
+from pathlib import Path
+root_dir = Path(os.getcwd()).parent
+sys.path.append(str(root_dir))
+from backend.models import *
+from backend.utils import *
+from backend.checkpoint import checkpointer
 
 os.environ["LANGCHAIN_PROJECT"] = "Production-RAG-system"
 
@@ -101,4 +105,4 @@ graph.add_node('chat_node', chat_node)
 graph.add_edge(START, 'pipeline_&_query')
 graph.add_edge('pipeline_&_query', 'chat_node')
 graph.add_edge('chat_node', END)
-system = graph.compile(checkpointer=checkpointer)
+system = graph.compile()

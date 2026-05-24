@@ -5,8 +5,12 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 from langsmith import traceable
-from .models import *
-from .checkpoint import checkpointer
+import sys
+from pathlib import Path
+root_dir = Path(os.getcwd()).parent
+sys.path.append(str(root_dir))
+from backend.models import *
+from backend.checkpoint import checkpointer
 import yaml
 from langchain_core.prompts import ChatPromptTemplate
 
