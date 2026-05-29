@@ -74,6 +74,17 @@ def main():
         json.dump(dict(result), out, indent=2)
         print("Latest Eval report is available at tests/evaluation/latest_eval_report.json")
     
+    scores = dict[result]
+    current_faithfulness = scores.get('faithfulness', 0.0)
+    print(f"\nCurrent system faithfulness: {current_faithfulness}")
+    THRESHOLD = 0.75
+    if current_faithfulness < THRESHOLD:
+        print(f"❌ REGRESSION DETECTED: Faithfulness dropped below threshold ({THRESHOLD})!")
+        sys.exit(1)
+    
+    print("✅ Quality Gate Passed! System is stable.")
+    sys.exit(0)
+    
 
 if __name__=="__main__":
     main()
