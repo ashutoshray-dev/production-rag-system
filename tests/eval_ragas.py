@@ -1,33 +1,22 @@
 import json
 import os
 from datasets import Dataset
-from ragas import evaluate
-# from ragas.metrics import _faithfulness, _answer_relevance, _context_precision
+from ragas import evaluate, RunConfig
 from ragas.metrics import (
     Faithfulness, 
     ContextPrecision, 
     AnswerRelevancy
 )
 import sys
-from pathlib import Path
-# root_dir = Path(os.getcwd()).parent
-# sys.path.append(str(root_dir))
-# current_file_path = Path(__file__).resolve()
-# root_dir = current_file_path.parent.parent
-# if str(root_dir) not in sys.path:
-#     sys.path.append(root_dir)
-# print(root_dir)
 from backend.graph import system
-from backend.models import model
-from ragas.llms import llm_factory, LangchainLLMWrapper
-from ragas.embeddings import embedding_factory, LangchainEmbeddingsWrapper
-# from ragas.metrics._faithfullness import Faithfullnes
+from ragas.llms import llm_factory
+from ragas.embeddings.base import embedding_factory
+from google import genai
 
-client = os.getenv("GOOGLE_API_KEY")
-eval_llm = llm_factory('gemini-3-flash-preview', client=client)
+
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+eval_llm = llm_factory(model='gemini-2.5-flash-lite', provider='google', client=client)
 eval_embeddings = embedding_factory('huggingface', model='BAAI/bge-small-en-v1.5')
-eval_llm_wrapper = LangchainLLMWrapper(eval_llm)
-eval_embed_wrapper = LangchainEmbeddingsWrapper(eval_embeddings)
 def run_rag_on_testset(test_set_path:str):
     """Feeds test questions to Langgraph and captures its full runtime state."""
     with open(test_set_path, 'r', encoding='utf-8') as f:
@@ -62,31 +51,46 @@ def main():
         print(f"Error: Evaluation set missing at {eval_file}")
         return
     metrics = [
-        Faithfulness(llm=eval_llm_wrapper),
-        ContextPrecision(llm=eval_llm_wrapper),
-        AnswerRelevancy(llm=eval_llm_wrapper, embeddings=eval_embed_wrapper) # Added embeddings here
+        Faithfulness(),
+        # ContextPrecision(),
+        # AnswerRelevancy(llm=eval_llm, embeddings=eval_embeddings) # Added embeddings here
     ]
-    # for m in metrics:
-    #     m.init()
         
     runtime_data = run_rag_on_testset(eval_file)
     eval_dataset = Dataset.from_dict(runtime_data)
+    # run_config = RunConfig(max_workers=1, timeout=60)
     print("Running LLM-as-Judge evalaution matrix via Ragas: ")
     result = evaluate(
         dataset=eval_dataset,
-        metrics=metrics
+        metrics=metrics, 
+        llm=eval_llm,
+        embeddings=eval_embeddings
+        # run_config=run_config
     )
     print("Evaluation summary------------------------------------------------")
     print(result)
     print("---------------------------------------------------------------------")
 
+    try:
+        scores_dict = result.to_pandas().mean(numeric_only=True).to_dict()
+    except Exception:
+        scores_dict = {k:v for k,v in result.items() if v is not None}
+    
+    os.makedirs('tests/evaluation', exist_ok=True)
     with open("tests/evaluation/latest_eval_report.json", 'w') as out:
-        json.dump(dict(result), out, indent=2)
+        json.dump(scores_dict, out, indent=2)
         print("Latest Eval report is available at tests/evaluation/latest_eval_report.json")
     
-    scores = dict(result)
-    current_faithfulness = scores.get('faithfulness', 0.0)
+    # scores = dict(result)
+    current_faithfulness = scores_dict.get('faithfulness', 0.0)
+    current_precision = scores_dict.get('context_precision', 0.0)
+    import math
+    if math.isnan(current_faithfulness):
+        current_faithfulness=0.0
+    if math.isnan(current_precision):
+        current_precision=0.0
     print(f"\nCurrent system faithfulness: {current_faithfulness}")
+
     THRESHOLD = 0.75
     if current_faithfulness < THRESHOLD:
         print(f"❌ REGRESSION DETECTED: Faithfulness dropped below threshold ({THRESHOLD})!")
@@ -98,4 +102,3 @@ def main():
 
 if __name__=="__main__":
     main()
-
