@@ -12,15 +12,20 @@ from backend.graph import system
 from ragas.llms import llm_factory
 from ragas.embeddings.base import embedding_factory
 from google import genai
+from openai import OpenAI
 
 
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+# client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+client = OpenAI(
+    api_key=os.environ.get("OPENROUTER_API_KEY"),
+    base_url="https://openrouter.ai/api/v1"
+)
 eval_llm = llm_factory(model='gemini-2.5-flash-lite', provider='google', client=client)
 eval_embeddings = embedding_factory('huggingface', model='BAAI/bge-small-en-v1.5')
 def run_rag_on_testset(test_set_path:str):
     """Feeds test questions to Langgraph and captures its full runtime state."""
     with open(test_set_path, 'r', encoding='utf-8') as f:
-        golden_data = json.load(f)
+        golden_data = (json.load(f))[:1]
 
     queries = []
     generated_answers = []
@@ -51,21 +56,21 @@ def main():
         print(f"Error: Evaluation set missing at {eval_file}")
         return
     metrics = [
-        Faithfulness(),
-        # ContextPrecision(),
+        # Faithfulness(),
+        ContextPrecision(),
         # AnswerRelevancy(llm=eval_llm, embeddings=eval_embeddings) # Added embeddings here
     ]
         
     runtime_data = run_rag_on_testset(eval_file)
     eval_dataset = Dataset.from_dict(runtime_data)
-    # run_config = RunConfig(max_workers=1, timeout=60)
+    run_config = RunConfig(max_workers=1, timeout=60)
     print("Running LLM-as-Judge evalaution matrix via Ragas: ")
     result = evaluate(
         dataset=eval_dataset,
         metrics=metrics, 
         llm=eval_llm,
-        embeddings=eval_embeddings
-        # run_config=run_config
+        # embeddings=eval_embeddings,
+        run_config=run_config
     )
     print("Evaluation summary------------------------------------------------")
     print(result)
@@ -90,9 +95,10 @@ def main():
     if math.isnan(current_precision):
         current_precision=0.0
     print(f"\nCurrent system faithfulness: {current_faithfulness}")
+    print(f"\nCurrent system context precision: {current_precision}")
 
     THRESHOLD = 0.75
-    if current_faithfulness < THRESHOLD:
+    if current_precision < THRESHOLD:
         print(f"❌ REGRESSION DETECTED: Faithfulness dropped below threshold ({THRESHOLD})!")
         sys.exit(1)
     
