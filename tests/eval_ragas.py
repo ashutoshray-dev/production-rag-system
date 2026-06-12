@@ -20,12 +20,13 @@ client = OpenAI(
     api_key=os.environ.get("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1"
 )
-eval_llm = llm_factory(model='gemini-2.5-flash-lite', provider='google', client=client)
+# eval_llm = llm_factory(model='gemini-2.5-flash-lite', provider='google', client=client)
+eval_llm = llm_factory(model='openrouter/auto', provider='openai', client=client)
 eval_embeddings = embedding_factory('huggingface', model='BAAI/bge-small-en-v1.5')
 def run_rag_on_testset(test_set_path:str):
     """Feeds test questions to Langgraph and captures its full runtime state."""
     with open(test_set_path, 'r', encoding='utf-8') as f:
-        golden_data = (json.load(f))[:1]
+        golden_data = (json.load(f))[:5]
 
     queries = []
     generated_answers = []
@@ -56,8 +57,8 @@ def main():
         print(f"Error: Evaluation set missing at {eval_file}")
         return
     metrics = [
-        # Faithfulness(),
-        ContextPrecision(),
+        Faithfulness(),
+        # ContextPrecision(),
         # AnswerRelevancy(llm=eval_llm, embeddings=eval_embeddings) # Added embeddings here
     ]
         
@@ -88,17 +89,17 @@ def main():
     
     # scores = dict(result)
     current_faithfulness = scores_dict.get('faithfulness', 0.0)
-    current_precision = scores_dict.get('context_precision', 0.0)
+    # current_precision = scores_dict.get('context_precision', 0.0)
     import math
     if math.isnan(current_faithfulness):
         current_faithfulness=0.0
-    if math.isnan(current_precision):
-        current_precision=0.0
+    # if math.isnan(current_precision):
+    #     current_precision=0.0
     print(f"\nCurrent system faithfulness: {current_faithfulness}")
-    print(f"\nCurrent system context precision: {current_precision}")
+    # print(f"\nCurrent system context precision: {current_precision}")
 
     THRESHOLD = 0.75
-    if current_precision < THRESHOLD:
+    if current_faithfulness < THRESHOLD:
         print(f"❌ REGRESSION DETECTED: Faithfulness dropped below threshold ({THRESHOLD})!")
         sys.exit(1)
     
