@@ -40,7 +40,7 @@ def pipeline_query(state:ChatState, config:RunnableConfig, path='docs/ml_paper1.
     docs = state.get('docs')
     vector_store_path = state.get('vector_store_path')
     bm25_path = state.get('bm25_path')
-    thread_id = config.get("configurable", {}).get("thread_id", "default_thread")
+    thread_id = config.get("configurable", {}).get("thread_id", "")
 
     if vector_store_path and bm25_path and os.path.exists(vector_store_path) and os.path.exists(bm25_path):
         vector_store = FAISS.load_local(state['vector_store_path'], embeddings=embedding_model, allow_dangerous_deserialization=True)
@@ -88,7 +88,7 @@ def chat_node(state: ChatState):
         return "\n".join(formatted)
     # structured_model = model.with_structured_output(FinalResponse)
     chain = (
-        {'context':lambda _: format_docs_with_metadata(docs), 'input': RunnablePassthrough()} | prompt | model
+        {'context':lambda _: format_docs_with_metadata(docs), 'input': RunnablePassthrough()} | prompt | model2
     )
     response = chain.invoke(messages[-1].content)
     if not state.get('chat_title'):
@@ -105,4 +105,4 @@ graph.add_node('chat_node', chat_node)
 graph.add_edge(START, 'pipeline_&_query')
 graph.add_edge('pipeline_&_query', 'chat_node')
 graph.add_edge('chat_node', END)
-system = graph.compile()
+system = graph.compile(checkpointer=checkpointer)

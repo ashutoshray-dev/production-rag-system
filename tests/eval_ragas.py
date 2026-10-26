@@ -3,25 +3,40 @@ import os
 from datasets import Dataset
 from ragas import evaluate, RunConfig
 from ragas.metrics import (
-    Faithfulness, 
-    ContextPrecision, 
-    AnswerRelevancy
+    Faithfulness,
+    # ContextPrecision,
+    # AnswerRelevancy,
 )
 import sys
 from backend.graph import system
 from ragas.llms import llm_factory
 from ragas.embeddings.base import embedding_factory
-from google import genai
 from openai import OpenAI
+from langchain_ollama import ChatOllama
+from google import genai
 
 
-# client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+# client3 = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+# model = ChatOllama(model='qwen2.5:3b', reasoning=True)
 client = OpenAI(
     api_key=os.environ.get("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1"
 )
-# eval_llm = llm_factory(model='gemini-2.5-flash-lite', provider='google', client=client)
-eval_llm = llm_factory(model='openrouter/auto', provider='openai', client=client)
+client2 = OpenAI(
+    # model="nvidia/nemotron-3-super-120b-a12b:free",
+    api_key=os.environ.get("FREE_LLM_API_KEY"),
+    base_url="http://127.0.0.1:31415/v1",
+    # temperature=0,
+    max_retries=5,
+    timeout=90,
+    # model_kwargs={
+    #     "parallel_tool_calls": False,
+    # },
+)
+# eval_llm = llm_factory(model='qwen2.5:3b', provider='ollama', client=model)
+# eval_llm = llm_factory(model='gemini-2.5-flash-lite', provider='google', client=client2)
+# eval_llm = llm_factory(model='openrouter/auto', provider='openai', client=client)
+eval_llm = llm_factory(model='auto', provider='openai', client=client2, max_tokens=4096)
 eval_embeddings = embedding_factory('huggingface', model='BAAI/bge-small-en-v1.5')
 def run_rag_on_testset(test_set_path:str):
     """Feeds test questions to Langgraph and captures its full runtime state."""
@@ -37,7 +52,7 @@ def run_rag_on_testset(test_set_path:str):
     for item in golden_data:
         user_query = item['user_input']
         initial_state = {"messages": [user_query]}
-        config = {'configurable': {"thread_id":"eval_session_prod"}}
+        config = {'configurable': {"thread_id":"evals_session_prod"}}
         final_state = system.invoke(initial_state, config=config)
         queries.append(user_query)
         generated_answers.append(final_state.get("messages", "")[-1].content) 
@@ -64,7 +79,7 @@ def main():
         
     runtime_data = run_rag_on_testset(eval_file)
     eval_dataset = Dataset.from_dict(runtime_data)
-    run_config = RunConfig(max_workers=1, timeout=60)
+    run_config = RunConfig(max_workers=3, timeout=60)
     print("Running LLM-as-Judge evalaution matrix via Ragas: ")
     result = evaluate(
         dataset=eval_dataset,
@@ -89,7 +104,7 @@ def main():
     
     # scores = dict(result)
     current_faithfulness = scores_dict.get('faithfulness', 0.0)
-    # current_precision = scores_dict.get('context_precision', 0.0)
+    # current_precision = scores_dict.get('answer_relevancy', 0.0)
     import math
     if math.isnan(current_faithfulness):
         current_faithfulness=0.0

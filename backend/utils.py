@@ -60,7 +60,7 @@ def retrieve_threads_list():
             all_threads.insert(0, thread)
     return all_threads
 def generate_title(user_input):
-    structured_model = model.with_structured_output(ChatTitle)
+    structured_model = model2.with_structured_output(ChatTitle)
     title = structured_model.invoke(f'generate a suitable 4-5words title for this input that feels appropriate for the topic. If no input is present genetrate a random string.\ninput:{user_input}')
     # for models that return structured output with typeddict
     # return title['chat_title']
@@ -76,6 +76,6 @@ def load_system_prompt(config_path: str = "configs/prompts.yaml") -> ChatPromptT
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    raw_template = config.get("system_prompt")
+    raw_template = config.get("system_prompt_v1.0")
     return ChatPromptTemplate.from_template(raw_template)
 
