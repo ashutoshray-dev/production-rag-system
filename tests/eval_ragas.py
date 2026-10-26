@@ -36,7 +36,7 @@ client2 = OpenAI(
 # eval_llm = llm_factory(model='qwen2.5:3b', provider='ollama', client=model)
 # eval_llm = llm_factory(model='gemini-2.5-flash-lite', provider='google', client=client2)
 # eval_llm = llm_factory(model='openrouter/auto', provider='openai', client=client)
-eval_llm = llm_factory(model='auto', provider='openai', client=client2, max_tokens=4096)
+eval_llm = llm_factory(model='openrouter/auto', provider='openai', client=client, max_tokens=4096)
 eval_embeddings = embedding_factory('huggingface', model='BAAI/bge-small-en-v1.5')
 def run_rag_on_testset(test_set_path:str):
     """Feeds test questions to Langgraph and captures its full runtime state."""
